@@ -5,12 +5,14 @@ import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 
 class SystemState(enum.Enum):
-    IDLE = 0            # Down Locked
+    IDLE = 0            # System at rest, gears are down
     MOVING_UP = 1       # Going to Up
     UPLOCKED = 2        # Holding at Up
     MOVING_DOWN = 3     # Going to Down
-    STOPPING = 4        # Emergency return to Down
-    ABORTED = 5         # Immediate Stop
+    DOWNLOCKED = 4      # Holding at Down
+    STOPPING = 5        # Emergency return to Down
+    ABORTED = 6         # Immediate Stop
+    STOPPED = 7         # Paused / Freezed
 
 class SignalManager(QObject):
     # Signals to update GUI
@@ -21,6 +23,7 @@ class SignalManager(QObject):
     # state: current system state string
     data_updated = pyqtSignal(list, list, list, list, str) 
     state_changed = pyqtSignal(str)
+    cycle_updated = pyqtSignal(int, int) # current_count, target_count
     
     def __init__(self):
         super().__init__()
@@ -29,8 +32,13 @@ class SignalManager(QObject):
         self.dt = 0.1  # 100ms
         self.noise_level = 0.05 # 5%
         
+        # Cycle Counters (목표/현재 런타임 카운터)
+        self.target_count = 1
+        self.current_count = 0
+        
         # System State
         self.state = SystemState.IDLE
+        self.previous_state = SystemState.IDLE
         self.state_timer = 0.0
         
         # Physical Values
@@ -58,6 +66,10 @@ class SignalManager(QObject):
     def stop_simulation(self):
         self.timer.stop()
         
+    def set_target_count(self, count):
+        self.target_count = count
+        self.cycle_updated.emit(self.current_count, self.target_count)
+        
     def set_command(self, command):
         """
         External commands: 'START', 'STOP', 'ABORT'
@@ -68,13 +80,15 @@ class SignalManager(QObject):
             # Immediate stop, no movement
             
         elif command == 'STOP':
-            if self.state != SystemState.IDLE:
-                self.state = SystemState.STOPPING
-                self.state_timer = 0.0
-                self.state_changed.emit("STOPPING")
+            if self.state not in (SystemState.IDLE, SystemState.ABORTED, SystemState.STOPPED):
+                self.previous_state = self.state
+                self.state = SystemState.STOPPED
+                self.state_changed.emit("STOPPED")
                 
         elif command == 'START':
-            if self.state == SystemState.IDLE or self.state == SystemState.ABORTED:
+            if self.state in (SystemState.IDLE, SystemState.ABORTED):
+                self.current_count = 0
+                self.cycle_updated.emit(self.current_count, self.target_count)
                 self.state = SystemState.MOVING_UP
                 self.state_timer = 0.0
                 self.state_changed.emit("MOVING_UP")
@@ -82,6 +96,15 @@ class SignalManager(QObject):
                 self.limits[0] = False
                 self.limits[2] = False
                 self.limits[4] = False
+            elif self.state == SystemState.STOPPED:
+                # Resume from pause
+                self.state = self.previous_state
+                self.state_changed.emit(self.state.name)
+                
+        elif command == 'RESET':
+            if self.state in (SystemState.STOPPED, SystemState.IDLE, SystemState.ABORTED):
+                self.current_count = 0
+                self.cycle_updated.emit(self.current_count, self.target_count)
 
     def update_loop(self):
         self.update_physics()
@@ -107,7 +130,7 @@ class SignalManager(QObject):
             self.flows[i] = max(0, min(1.0, self.base_flows[i] + f_noise))
 
     def update_logic(self):
-        if self.state == SystemState.ABORTED:
+        if self.state in (SystemState.ABORTED, SystemState.STOPPED):
             return
 
         self.state_timer += self.dt
@@ -164,10 +187,32 @@ class SignalManager(QObject):
                         finished = False
             
             if finished:
-                self.state = SystemState.IDLE
-                self.state_timer = 0.0
-                self.state_changed.emit("IDLE")
-                # Set Down Limits
+                # Set Down Limits immediately when finished moving
                 self.limits[0] = True
                 self.limits[2] = True
                 self.limits[4] = True
+                
+                # Transition to DOWNLOCKED state instead of immediate IDLE / MOVING_UP
+                self.state = SystemState.DOWNLOCKED
+                self.state_timer = 0.0
+                self.state_changed.emit("DOWNLOCKED")
+                
+        elif self.state == SystemState.DOWNLOCKED:
+            if self.state_timer >= 3.0: # Down lock stop time is 3 seconds
+                # Down completed, increase count
+                self.current_count += 1
+                self.cycle_updated.emit(self.current_count, self.target_count)
+                
+                if self.current_count < self.target_count and self.state != SystemState.STOPPING:
+                    # Continue to next cycle automatically
+                    self.state = SystemState.MOVING_UP
+                    self.state_timer = 0.0
+                    self.state_changed.emit("MOVING_UP")
+                    # Release Down Locks
+                    self.limits[0] = False
+                    self.limits[2] = False
+                    self.limits[4] = False
+                else:
+                    self.state = SystemState.IDLE
+                    self.state_timer = 0.0
+                    self.state_changed.emit("IDLE")

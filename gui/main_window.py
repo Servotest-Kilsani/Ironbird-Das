@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QPushButton, QLabel, QGridLayout, QGroupBox)
+                             QPushButton, QLabel, QGridLayout, QGroupBox, QSpinBox)
 from PyQt6.QtCore import Qt
-from gui.widgets import GearVisualizer, DigitalMeter, LEDIndicator
+from gui.widgets import GearVisualizer, DigitalMeter, LEDIndicator, DigitalSpinBox
 
 class MainWindow(QMainWindow):
     def __init__(self, simulator):
@@ -34,12 +34,32 @@ class MainWindow(QMainWindow):
         self.btn_abort.setStyleSheet("background-color: #F44336; color: white; font-weight: bold;")
         self.btn_abort.clicked.connect(lambda: self.simulator.set_command('ABORT'))
         
+        self.btn_reset = QPushButton("RESET")
+        self.btn_reset.setMinimumHeight(40)
+        self.btn_reset.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
+        self.btn_reset.clicked.connect(lambda: self.simulator.set_command('RESET'))
+        
         self.status_label = QLabel("STATUS: IDLE")
         self.status_label.setStyleSheet("font-size: 14px; font-weight: bold; margin-left: 20px;")
+        
+        # Cycle Counting UI (목표 횟수 및 현재 수행 횟수)
+        cycle_layout = QHBoxLayout()
+        
+        self.spin_target = DigitalSpinBox("Target")
+        self.spin_target.spin_box.setMinimum(1)
+        self.spin_target.spin_box.setMaximum(100)
+        self.spin_target.spin_box.setValue(1)
+        self.spin_target.spin_box.valueChanged.connect(self.simulator.set_target_count)
+        cycle_layout.addWidget(self.spin_target)
+        
+        self.meter_current = DigitalMeter("Current", "", is_int=True)
+        cycle_layout.addWidget(self.meter_current)
         
         control_layout.addWidget(self.btn_start)
         control_layout.addWidget(self.btn_stop)
         control_layout.addWidget(self.btn_abort)
+        control_layout.addWidget(self.btn_reset)
+        control_layout.addLayout(cycle_layout)
         control_layout.addWidget(self.status_label)
         control_group.setLayout(control_layout)
         
@@ -49,9 +69,9 @@ class MainWindow(QMainWindow):
         vis_group = QGroupBox("Landing Gear Visualization")
         vis_layout = QHBoxLayout()
         
-        self.gear_nose = GearVisualizer("Nose Gear")
-        self.gear_mlh = GearVisualizer("Main LH")
-        self.gear_mrh = GearVisualizer("Main RH")
+        self.gear_nose = GearVisualizer("Nose Gear", image_name="nose_gear.png", rotation_dir=-1) # 반시계 방향
+        self.gear_mlh = GearVisualizer("Main LH", image_name="main_lh_gear.png", rotation_dir=-1) # 반시계 방향
+        self.gear_mrh = GearVisualizer("Main RH", image_name="main_rh_gear.png", rotation_dir=1)  # 시계 방향
         
         vis_layout.addWidget(self.gear_nose)
         vis_layout.addWidget(self.gear_mlh)
@@ -105,6 +125,15 @@ class MainWindow(QMainWindow):
         # Connect Signals
         self.simulator.data_updated.connect(self.update_ui)
         self.simulator.state_changed.connect(self.update_status)
+        self.simulator.cycle_updated.connect(self.update_cycle_count)
+
+    def update_cycle_count(self, current, target):
+        self.meter_current.set_value(current)
+        # Update spinbox if it has different value to keep sync
+        if self.spin_target.spin_box.value() != target:
+            self.spin_target.spin_box.blockSignals(True)
+            self.spin_target.spin_box.setValue(target)
+            self.spin_target.spin_box.blockSignals(False)
 
     def update_ui(self, angles, pressures, flows, limits):
         # Update Gears
@@ -134,7 +163,7 @@ class MainWindow(QMainWindow):
         # Style update based on state
         if state_str == "ABORTED":
             self.status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: red;")
-        elif state_str == "STOPPING":
+        elif state_str in ("STOPPING", "STOPPED"):
              self.status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: orange;")
         else:
              self.status_label.setStyleSheet("font-size: 14px; font-weight: bold; color: black;")

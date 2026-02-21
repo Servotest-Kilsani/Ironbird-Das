@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QGridLayout
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QGridLayout, QSpinBox
 from PyQt6.QtCore import Qt, QSize, QPointF
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QPolygonF, QPixmap
 
@@ -28,7 +28,40 @@ class LEDIndicator(QWidget):
         painter.drawEllipse(0, 0, self.size, self.size)
 
 class DigitalMeter(QWidget):
-    def __init__(self, title, unit):
+    def __init__(self, title, unit="", is_int=False):
+        super().__init__()
+        self.is_int = is_int
+        layout = QVBoxLayout()
+        layout.setContentsMargins(2, 2, 2, 2)
+        
+        self.title_label = QLabel(title)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label.setStyleSheet("font-size: 10px; color: gray;")
+        
+        self.value_label = QLabel("0" if is_int else "0.00")
+        self.value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.value_label.setStyleSheet("font-size: 16px; font-weight: bold; border: 1px solid gray; background: black; color: #00FF00;")
+        self.value_label.setMinimumHeight(24) # Align height
+        
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.value_label)
+        
+        if unit:
+            self.unit_label = QLabel(unit)
+            self.unit_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+            self.unit_label.setStyleSheet("font-size: 10px;")
+            layout.addWidget(self.unit_label)
+            
+        self.setLayout(layout)
+
+    def set_value(self, value):
+        if self.is_int:
+            self.value_label.setText(f"{int(value)}")
+        else:
+            self.value_label.setText(f"{value:.2f}")
+
+class DigitalSpinBox(QWidget):
+    def __init__(self, title, unit=""):
         super().__init__()
         layout = QVBoxLayout()
         layout.setContentsMargins(2, 2, 2, 2)
@@ -37,27 +70,32 @@ class DigitalMeter(QWidget):
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.setStyleSheet("font-size: 10px; color: gray;")
         
-        self.value_label = QLabel("0.00")
-        self.value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.value_label.setStyleSheet("font-size: 16px; font-weight: bold; border: 1px solid gray; background: black; color: #00FF00;")
-        
-        self.unit_label = QLabel(unit)
-        self.unit_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.unit_label.setStyleSheet("font-size: 10px;")
+        self.spin_box = QSpinBox()
+        self.spin_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.spin_box.setStyleSheet(
+            "QSpinBox { font-size: 16px; font-weight: bold; border: 1px solid gray; background: black; color: white; }"
+            "QSpinBox::up-button { width: 20px; }"
+            "QSpinBox::down-button { width: 20px; }"
+        )
+        self.spin_box.setMinimumHeight(24) # Align height
         
         layout.addWidget(self.title_label)
-        layout.addWidget(self.value_label)
-        layout.addWidget(self.unit_label)
+        layout.addWidget(self.spin_box)
+        
+        if unit:
+            self.unit_label = QLabel(unit)
+            self.unit_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+            self.unit_label.setStyleSheet("font-size: 10px;")
+            layout.addWidget(self.unit_label)
+            
         self.setLayout(layout)
 
-    def set_value(self, value):
-        self.value_label.setText(f"{value:.2f}")
-
 class GearVisualizer(QWidget):
-    def __init__(self, name):
+    def __init__(self, name, image_name="gear_image.png", rotation_dir=-1):
         super().__init__()
         self.name = name
         self.angle = 0.0 # 0=Down (Vertical), 90=Up (Horizontal)
+        self.rotation_dir = rotation_dir
         self.setMinimumSize(150, 200)
         
         layout = QVBoxLayout()
@@ -71,8 +109,8 @@ class GearVisualizer(QWidget):
         # Use absolute path relative to this file to avoid CWD issues
         import os
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        # gui/widgets.py -> gui/ -> gui/resources/gear_image.png
-        self.image_path = os.path.join(current_dir, "resources", "gear_image.png")
+        # gui/widgets.py -> gui/ -> gui/resources/{image_name}
+        self.image_path = os.path.join(current_dir, "resources", image_name)
         
         print(f"[GearVisualizer] Looking for image at: {self.image_path}")
         self.pixmap = QPixmap(self.image_path)
@@ -102,19 +140,21 @@ class GearVisualizer(QWidget):
         painter.drawEllipse(QPointF(cx, cy), 5, 5)
         
         painter.save()
-        painter.translate(cx, cy)
-        # Rotate: 0 deg = Down. -90 deg = Right/Up.
-        painter.rotate(-self.angle)
+        painter.translate(cx, cy + 30) # Shift pivot point down by 30 pixels
+        # Rotate: rotation_dir controls clockwise vs counter-clockwise
+        painter.rotate(self.rotation_dir * self.angle)
         
         if not self.pixmap.isNull():
             # Scale pixmap to fit reasonable height, e.g., 120px
             target_height = 120
+            # Ensure transparency rendering instead of checkered background by using Alpha mode if needed
+            # For QPixmap, smooth transformation handles alpha correctly if image has it. 
+            # The checkered background usually means the image was saved with a checkered pattern instead of real transparency.
             scaled_pixmap = self.pixmap.scaledToHeight(target_height, Qt.TransformationMode.SmoothTransformation)
             pw = scaled_pixmap.width()
             ph = scaled_pixmap.height()
             
             # Draw such that (0,0) is the pivot point (top center of gear)
-            # Assuming the image top-center corresponds to the pivot
             painter.drawPixmap(-pw//2, 0, scaled_pixmap)
         else:
             # Fallback drawing if image missing
