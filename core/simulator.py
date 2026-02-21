@@ -2,7 +2,15 @@ import enum
 import time
 import random
 import numpy as np
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+
+class Event:
+    def __init__(self):
+        self._callbacks = []
+    def connect(self, callback):
+        self._callbacks.append(callback)
+    def emit(self, *args, **kwargs):
+        for cb in self._callbacks:
+            cb(*args, **kwargs)
 
 class SystemState(enum.Enum):
     IDLE = 0            # System at rest, gears are down
@@ -14,19 +22,13 @@ class SystemState(enum.Enum):
     ABORTED = 6         # Immediate Stop
     STOPPED = 7         # Paused / Freezed
 
-class SignalManager(QObject):
-    # Signals to update GUI
-    # angles: nose, main_lh, main_rh (0-90)
-    # pressures: 10 channels
-    # flows: 10 channels
-    # limits: 6 channels
-    # state: current system state string
-    data_updated = pyqtSignal(list, list, list, list, str) 
-    state_changed = pyqtSignal(str)
-    cycle_updated = pyqtSignal(int, int) # current_count, target_count
-    
+class SignalManager:
     def __init__(self):
-        super().__init__()
+        # Events to update GUI (replaces pyqtSignal)
+        # angles, pressures, flows, limits, state
+        self.data_updated = Event()
+        self.state_changed = Event()
+        self.cycle_updated = Event()
         
         # Configuration
         self.dt = 0.1  # 100ms
@@ -56,15 +58,14 @@ class SignalManager(QObject):
         # Limit Switches: [Nose_Down, Nose_Up, MLH_Down, MLH_Up, MRH_Down, MRH_Up]
         self.limits = [True, False, True, False, True, False]
         
-        # Timer
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_loop)
+        # is_running flag for external loops
+        self.is_running = False
         
     def start_simulation(self):
-        self.timer.start(int(self.dt * 1000))
+        self.is_running = True
         
     def stop_simulation(self):
-        self.timer.stop()
+        self.is_running = False
         
     def set_target_count(self, count):
         self.target_count = count

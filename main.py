@@ -1,6 +1,7 @@
 import sys
 import datetime
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QTimer
 from core.simulator import SignalManager
 from core.logger import DataLogger
 from gui.main_window import MainWindow
@@ -63,6 +64,10 @@ def main():
     # Req: "GUI ... 사용자 화면 ... Simulator는 실제 Rig를 대체 ... 신호를 발생해야 합니다."
     # Usually DAS shows current values always. So Simulator loop should run always.
     simulator.start_simulation()
+    
+    sim_timer = QTimer()
+    sim_timer.timeout.connect(simulator.update_loop)
+    sim_timer.start(int(simulator.dt * 1000))
     
     # MainWindow update_ui also needs to handle the new 5th arg 'state' 
     # But MainWindow.update_ui signature is (angles, pressures, flows, limits).
