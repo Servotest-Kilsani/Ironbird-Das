@@ -87,9 +87,12 @@ class SignalManager:
                 self.state_changed.emit("STOPPED")
                 
         elif command == 'START':
+            # 사용자가 설정한 target 사이클 횟수가 되었을 때 무한 루핑되지 않고 완전히 멈추도록 예외 처리
+            if self.current_count >= self.target_count:
+                return # 시작 명령 무시 (RESET을 눌러 0으로 돌아가도록 유도)
+
             if self.state in (SystemState.IDLE, SystemState.ABORTED):
-                self.current_count = 0
-                self.cycle_updated.emit(self.current_count, self.target_count)
+                # 기존처럼 START에서 카운트를 0으로 자동 리셋하지 않으므로 사용자의 명시적인 RESET 버튼 클릭이 필요합니다.
                 self.state = SystemState.MOVING_UP
                 self.state_timer = 0.0
                 self.state_changed.emit("MOVING_UP")
@@ -98,31 +101,23 @@ class SignalManager:
                 self.limits[2] = False
                 self.limits[4] = False
             elif self.state == SystemState.STOPPED:
-                # 만약 타겟 사이클에 이미 도달한 상태에서 START를 누르면 처음부터 다시 시작
-                if self.current_count >= self.target_count:
-                    self.current_count = 0
-                    self.cycle_updated.emit(self.current_count, self.target_count)
-                    self.state = SystemState.MOVING_UP
-                    self.state_timer = 0.0
-                    self.state_changed.emit("MOVING_UP")
-                    # Release Down Locks
-                    self.limits[0] = False
-                    self.limits[2] = False
-                    self.limits[4] = False
-                else:
-                    # 일시정지(Pause)에서 재개
-                    self.state = self.previous_state
-                    self.state_changed.emit(self.state.name)
+                # 일시정지(Pause)에서 재개
+                self.state = self.previous_state
+                self.state_changed.emit(self.state.name)
                 
         elif command == 'RESET':
-            # 상태에 관계없이 리셋 명령이 들어오면 무조건 사이클 카운트를 0으로 만듭니다.
+            # 어떤 상태이든 리셋 명령을 강제로 수행하여 0 사이클, 0 각도로 시스템을 온전히 되돌립니다.
             self.current_count = 0
             self.cycle_updated.emit(self.current_count, self.target_count)
-            # 만약 현재 구동 중(MOVING, LOCKED 등)이었다면 즉시 중지시키고 IDLE(초기)로 돌리려면 아래 코드를 사용합니다.
-            if self.state not in (SystemState.IDLE, SystemState.ABORTED, SystemState.STOPPED):
+            
+            if self.state != SystemState.ABORTED:
                 self.state = SystemState.IDLE
                 self.state_changed.emit("IDLE")
                 self.state_timer = 0.0
+                
+                # 강제 영점 조절 (완전한 초기화)
+                self.angles = [0.0, 0.0, 0.0]
+                self.limits = [True, False, True, False, True, False]
 
     def update_loop(self):
         self.update_physics()
