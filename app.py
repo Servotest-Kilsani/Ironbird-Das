@@ -130,10 +130,17 @@ with col_gear:
     def render_gear(col, name, angle, img_name, rot_dir):
         col.metric(name, f"{angle:.1f}°")
         rotated = dict_rotated_image(img_name, round(angle, 1), rot_dir)
-        if rotated:
-            col.image(rotated, use_container_width=True)
+        
+        # rotated 객체가 유효한 이미지인지 검사 (PIL.Image.Image 인스턴스 확인)
+        if rotated is not None and isinstance(rotated, Image.Image):
+            try:
+                # Streamlit Cloud에서 발생한 TypeError를 완화하기 위해 호환성이 검증된 use_column_width=True 사용.
+                # 참고로 Streamlit 구버전/신버전 모두에서 가장 안정적으로 이미지를 채우는 방법입니다.
+                col.image(rotated, use_column_width=True)
+            except Exception as e:
+                col.error(f"Image Load Error: {e}")
         else:
-            col.warning("No Image")
+            col.warning("No Valid Image")
 
     render_gear(c_n, "Nose", simulator.angles[0], "nose_gear.png", -1)
     render_gear(c_lh, "Main LH", simulator.angles[1], "main_lh_gear.png", -1)
