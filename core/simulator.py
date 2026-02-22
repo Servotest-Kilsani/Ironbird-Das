@@ -98,14 +98,31 @@ class SignalManager:
                 self.limits[2] = False
                 self.limits[4] = False
             elif self.state == SystemState.STOPPED:
-                # Resume from pause
-                self.state = self.previous_state
-                self.state_changed.emit(self.state.name)
+                # 만약 타겟 사이클에 이미 도달한 상태에서 START를 누르면 처음부터 다시 시작
+                if self.current_count >= self.target_count:
+                    self.current_count = 0
+                    self.cycle_updated.emit(self.current_count, self.target_count)
+                    self.state = SystemState.MOVING_UP
+                    self.state_timer = 0.0
+                    self.state_changed.emit("MOVING_UP")
+                    # Release Down Locks
+                    self.limits[0] = False
+                    self.limits[2] = False
+                    self.limits[4] = False
+                else:
+                    # 일시정지(Pause)에서 재개
+                    self.state = self.previous_state
+                    self.state_changed.emit(self.state.name)
                 
         elif command == 'RESET':
-            if self.state in (SystemState.STOPPED, SystemState.IDLE, SystemState.ABORTED):
-                self.current_count = 0
-                self.cycle_updated.emit(self.current_count, self.target_count)
+            # 상태에 관계없이 리셋 명령이 들어오면 무조건 사이클 카운트를 0으로 만듭니다.
+            self.current_count = 0
+            self.cycle_updated.emit(self.current_count, self.target_count)
+            # 만약 현재 구동 중(MOVING, LOCKED 등)이었다면 즉시 중지시키고 IDLE(초기)로 돌리려면 아래 코드를 사용합니다.
+            if self.state not in (SystemState.IDLE, SystemState.ABORTED, SystemState.STOPPED):
+                self.state = SystemState.IDLE
+                self.state_changed.emit("IDLE")
+                self.state_timer = 0.0
 
     def update_loop(self):
         self.update_physics()
@@ -116,12 +133,6 @@ class SignalManager:
 
     def update_physics(self):
         # Add noise to Pressure and Flow
-        # Range: Pressure 0-3000, Flow 0-1
-        # Noise is +/- 5% of range? Or current value? usually range or specific value.
-        # User said: "각 물리량의 범위 내에서 ±5%의 노이즈" -> 5% of Full Scale usually.
-        # Pressure FS = 3000, 5% = 150
-        # Flow FS = 1, 5% = 0.05
-        
         for i in range(10):
             p_noise = (random.random() - 0.5) * 2 * (3000 * self.noise_level)
             f_noise = (random.random() - 0.5) * 2 * (1.0 * self.noise_level)
@@ -214,6 +225,8 @@ class SignalManager:
                     self.limits[2] = False
                     self.limits[4] = False
                 else:
-                    self.state = SystemState.IDLE
+                    # Target cycle에 도달하면 무조건 움직임을 멈추도록 STOPPED 상태로 전환
+                    self.previous_state = SystemState.IDLE
+                    self.state = SystemState.STOPPED
                     self.state_timer = 0.0
-                    self.state_changed.emit("IDLE")
+                    self.state_changed.emit("STOPPED")
